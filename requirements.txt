@@ -1,0 +1,18 @@
+certifi @ file:///croot/certifi_1671487769961/work/certifi
+cffi @ file:///opt/conda/conda-bld/cffi_1642701102775/work
+h5py==3.8.0
+joblib==1.3.2
+mkl-fft==1.3.0
+mkl-random==1.1.1
+mkl-service==2.3.0
+numpy @ file:///tmp/build/80754af9/numpy_and_numpy_base_1603479632437/work
+onnx==1.14.1
+protobuf==4.24.4
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+scikit-learn==1.0.2
+scipy==1.2.0
+six @ file:///tmp/build/80754af9/six_1644875935023/work
+threadpoolctl==3.1.0
+torch==1.0.1
+tqdm==4.66.1
+typing_extensions==4.7.1
