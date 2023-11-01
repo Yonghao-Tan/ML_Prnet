@@ -15,7 +15,7 @@
   "cat_sampler": "gumbel_softmax",
   "dropout": 0.0,
   "batch_size": 36,
-  "test_batch_size": 1,
+  "test_batch_size": 12,
   "epochs": 100,
   "use_sgd": false,
   "lr": 0.001,

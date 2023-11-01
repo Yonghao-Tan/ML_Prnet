@@ -104,7 +104,7 @@ def main():
                         help='Dropout ratio in transformer')
     parser.add_argument('--batch_size', type=int, default=36, metavar='batch_size',
                         help='Size of batch)')
-    parser.add_argument('--test_batch_size', type=int, default=1, metavar='batch_size',
+    parser.add_argument('--test_batch_size', type=int, default=12, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=100, metavar='N',
                         help='number of episode to train ')

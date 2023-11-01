@@ -41,27 +41,25 @@ def pairwise_distance(src, tgt):
     return torch.sqrt(distances)
 
 
-def knn(x, k):
+def knn(x, k): # 得到每个点的k个最近邻点的index
     inner = -2 * torch.matmul(x.transpose(2, 1).contiguous(), x)
     xx = torch.sum(x ** 2, dim=1, keepdim=True)
     distance = -xx - inner - xx.transpose(2, 1).contiguous()
 
-    # idx = distance.topk(k=k, dim=-1)[1]  # (batch_size, num_points, k)
-    values, indices = torch.sort(distance, dim=-1, descending=True)
+    # idx = distance.topk(k=k, dim=-1)[1]  # (batch_size, num_points, k) idx = distance.topk(k=k, dim=-1, largest=False)[1] ? 
+    values, indices = torch.sort(distance, dim=-1, descending=True) # descending=False? 应该是true, 越远越好？
     idx = indices[..., :k]
     return idx
 
 
-def get_graph_feature(x, k=20):
+def get_graph_feature(x, k=20): # 好像是选了20个最近的，然后再从最近的里面找了一个最远的？
     # x = x.squeeze()
-    x = x.view(*x.size()[:3])
+    x = x.view(*x.size()[:3]) # [B, 3 (x,y,z), N] 本来就有三个维度，所以没变化
     idx = knn(x, k=k)  # (batch_size, num_points, k)
-    batch_size, num_points, _ = idx.size()
+    batch_size, num_points, _ = idx.size() # [B, N, k=20]
     device = torch.device('cuda')
-    print(idx.shape)
-    idx_base = torch.arange(0, batch_size, device=device).view(-1, 1, 1) * num_points
-    print(idx_base.shape)
-    idx = idx + idx_base
+    idx_base = torch.arange(0, batch_size, device=device).view(-1, 1, 1) * num_points # [B, 1, 1], 首先B是针对每个GPU，如果是1无所谓，是2的话那idx_base就是[0, D=768]，因为不同batch knn结果不同，需要区分
+    idx = idx + idx_base # 不同B的idx都不一样了
 
     idx = idx.view(-1)
 
@@ -72,8 +70,7 @@ def get_graph_feature(x, k=20):
     feature = feature.view(batch_size, num_points, k, num_dims)
     x = x.view(batch_size, num_points, 1, num_dims).repeat(1, 1, k, 1)
 
-    feature = torch.cat((feature, x), dim=3).permute(0, 3, 1, 2)
-
+    feature = torch.cat((feature, x), dim=3).permute(0, 3, 1, 2) # [B, D', N, k=20]
     return feature
 
 
@@ -309,7 +306,7 @@ class DGCNN(nn.Module):
         x = get_graph_feature(x)
         x = F.leaky_relu(self.bn1(self.conv1(x)), negative_slope=0.2)
         x1 = x.max(dim=-1, keepdim=True)[0]
- 
+
         x = get_graph_feature(x1)
         x = F.leaky_relu(self.bn2(self.conv2(x)), negative_slope=0.2)
         x2 = x.max(dim=-1, keepdim=True)[0]
@@ -323,7 +320,6 @@ class DGCNN(nn.Module):
         x4 = x.max(dim=-1, keepdim=True)[0]
 
         x = torch.cat((x1, x2, x3, x4), dim=1)
-
         x = F.leaky_relu(self.bn5(self.conv5(x)), negative_slope=0.2).view(batch_size, -1, num_points)
         return x
 
