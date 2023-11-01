@@ -58,9 +58,9 @@ def get_graph_feature(x, k=20):
     idx = knn(x, k=k)  # (batch_size, num_points, k)
     batch_size, num_points, _ = idx.size()
     device = torch.device('cuda')
-
+    print(idx.shape)
     idx_base = torch.arange(0, batch_size, device=device).view(-1, 1, 1) * num_points
-
+    print(idx_base.shape)
     idx = idx + idx_base
 
     idx = idx.view(-1)

@@ -33,6 +33,11 @@ python main.py --exp_name=exp2 --unseen=True
 
 python main.py --exp_name=exp3 --gaussian_noise=True
 
+## Evaluation
+python main.py --exp_name exp2 --unseen True --eval
+
+You can try evaluation first.
+
 ## Citation
 Please cite this paper if you want to use it in your work,
 
