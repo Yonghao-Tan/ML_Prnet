@@ -29,6 +29,12 @@ def _init_(args):
 
 
 def train(args, net, train_loader, test_loader):
+    if args.eval:
+        net.eval()
+        print('Evaluation Starts')
+        info_test = net._test_one_epoch(epoch=0, test_loader=test_loader)
+        print('Evaluation Ends')
+        return
     if args.use_sgd:
         print("Use SGD")
         opt = optim.SGD(net.parameters(), lr=args.lr * 100, momentum=args.momentum, weight_decay=1e-4)
@@ -98,7 +104,7 @@ def main():
                         help='Dropout ratio in transformer')
     parser.add_argument('--batch_size', type=int, default=36, metavar='batch_size',
                         help='Size of batch)')
-    parser.add_argument('--test_batch_size', type=int, default=12, metavar='batch_size',
+    parser.add_argument('--test_batch_size', type=int, default=1, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=100, metavar='N',
                         help='number of episode to train ')
@@ -132,6 +138,7 @@ def main():
                         help='Divided factor of rotation')
     parser.add_argument('--model_path', type=str, default='', metavar='N',
                         help='Pretrained model path')
+    parser.add_argument('--resume', action='store_true', default=False)
 
     args = parser.parse_args()
     torch.backends.cudnn.deterministic = True
@@ -156,6 +163,10 @@ def main():
         raise Exception("not implemented")
 
     if args.model == 'prnet':
+        if args.resume or args.eval:
+            if args.model_path is '':
+                print()
+                args.model_path = 'checkpoints' + '/' + args.exp_name + '/models/model.best.t7'
         net = PRNet(args).cuda()
         if args.eval:
             if args.model_path is '':
@@ -167,8 +178,8 @@ def main():
                 return
     else:
         raise Exception('Not implemented')
-    if not args.eval:
-        train(args, net, train_loader, test_loader)
+    # if not args.eval:
+    train(args, net, train_loader, test_loader)
 
     print('FINISH')
 

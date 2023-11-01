@@ -24,10 +24,10 @@ def clones(module, N):
 
 def attention(query, key, value, mask=None, dropout=None):
     d_k = query.size(-1)
-    scores = torch.matmul(query, key.transpose(-2, -1).contiguous()) / math.sqrt(d_k)
-    if mask is not None:
+    scores = torch.matmul(query, key.transpose(-2, -1).contiguous()) / math.sqrt(d_k) # q * k^T / sqrt(d_k), sqrt(d_k)用于归一化，防止梯度爆炸
+    if mask is not None: # 一直都是None
         scores = scores.masked_fill(mask==0, -1e9)
-    p_attn = F.softmax(scores, dim=-1)
+    p_attn = F.softmax(scores, dim=-1) # 平时attn内部用的是正常softmax
     if dropout is not None:
         p_attn = dropout(p_attn)
     return torch.matmul(p_attn, value), p_attn
@@ -46,7 +46,9 @@ def knn(x, k):
     xx = torch.sum(x ** 2, dim=1, keepdim=True)
     distance = -xx - inner - xx.transpose(2, 1).contiguous()
 
-    idx = distance.topk(k=k, dim=-1)[1]  # (batch_size, num_points, k)
+    # idx = distance.topk(k=k, dim=-1)[1]  # (batch_size, num_points, k)
+    values, indices = torch.sort(distance, dim=-1, descending=True)
+    idx = indices[..., :k]
     return idx
 
 
@@ -91,23 +93,25 @@ class EncoderDecoder(nn.Module):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self.src_embed = src_embed
-        self.tgt_embed = tgt_embed
-        self.generator = generator
+        self.src_embed = src_embed # 空
+        self.tgt_embed = tgt_embed # 空
+        self.generator = generator # 空
 
-    def forward(self, src, tgt, src_mask, tgt_mask):
+    def forward(self, src, tgt, src_mask, tgt_mask): 
+        # 第一次传入 (src, tgt, None, None)，输出是tgt_embedding
+        # 第二次传入 (tgt, src, None, None)，输出是src_embedding
         "Take in and process masked src and target sequences."
         return self.decode(self.encode(src, src_mask), src_mask,
-                           tgt, tgt_mask)
+                           tgt, tgt_mask) # 先encode再decode
 
-    def encode(self, src, src_mask):
+    def encode(self, src, src_mask): # mask=None，self.src_embed不就是nn.Sequential里面什么都没写？
         return self.encoder(self.src_embed(src), src_mask)
 
-    def decode(self, memory, src_mask, tgt, tgt_mask):
+    def decode(self, memory, src_mask, tgt, tgt_mask): # memory=self.encode(src, src_mask)，就是encoder输出作为decoder输入
         return self.generator(self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask))
 
 
-class Generator(nn.Module):
+class Generator(nn.Module): # 这东西都没被调用
     def __init__(self, n_emb_dims):
         super(Generator, self).__init__()
         self.nn = nn.Sequential(nn.Linear(n_emb_dims, n_emb_dims//2),
@@ -133,7 +137,7 @@ class Generator(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, layer, N):
         super(Encoder, self).__init__()
-        self.layers = clones(layer, N)
+        self.layers = clones(layer, N) # layer就是EncoderLayer, EncoderLayer这个子层又重复了N次
         self.norm = LayerNorm(layer.size)
 
     def forward(self, x, mask):
@@ -150,7 +154,7 @@ class Decoder(nn.Module):
         self.layers = clones(layer, N)
         self.norm = LayerNorm(layer.size)
 
-    def forward(self, x, memory, src_mask, tgt_mask):
+    def forward(self, x, memory, src_mask, tgt_mask): # mask = None
         for layer in self.layers:
             x = layer(x, memory, src_mask, tgt_mask)
         return self.norm(x)
@@ -169,27 +173,24 @@ class LayerNorm(nn.Module):
         return self.a_2 * (x-mean) / (std + self.eps) + self.b_2
 
 
-class SublayerConnection(nn.Module):
-    def __init__(self, size, dropout):
-        super(SublayerConnection, self).__init__()
-        self.norm = LayerNorm(size)
-        self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, sublayer):
-        return x + sublayer(self.norm(x))
-
-
-class EncoderLayer(nn.Module):
+class EncoderLayer(nn.Module): # 用来初始化encoder的各个层
     def __init__(self, size, self_attn, feed_forward, dropout):
         super(EncoderLayer, self).__init__()
-        self.self_attn = self_attn
-        self.feed_forward = feed_forward
-        self.sublayer = clones(SublayerConnection(size, dropout), 2)
+        self.norm1 = LayerNorm(size)
+        self.dropout1 = nn.Dropout(dropout)
+        self.self_attn = self_attn # 指定attention的类型, 是MHA，然后是在Transformer类里面指定了heads和dims
+        self.norm2 = LayerNorm(size)
+        self.dropout2 = nn.Dropout(dropout)
+        self.feed_forward = feed_forward # position-wise feed forward
         self.size = size
 
-    def forward(self, x, mask):
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
-        return self.sublayer[1](x, self.feed_forward)
+    def forward(self, x, mask): # MHA + FFN
+        x_norm1 = self.norm1(x)
+        x = x + self.self_attn(x_norm1, x_norm1, x_norm1, mask) # attention和feed forward各有一层残差连接
+        x_norm2 = self.norm2(x)
+        x = x + self.feed_forward(x_norm2)
+        return x
 
 
 class DecoderLayer(nn.Module):
@@ -198,17 +199,26 @@ class DecoderLayer(nn.Module):
     def __init__(self, size, self_attn, src_attn, feed_forward, dropout):
         super(DecoderLayer, self).__init__()
         self.size = size
+        self.norm1 = LayerNorm(size)
+        self.dropout1 = nn.Dropout(dropout)
         self.self_attn = self_attn
+        self.norm2 = LayerNorm(size)
+        self.dropout2 = nn.Dropout(dropout)
         self.src_attn = src_attn
+        self.norm3 = LayerNorm(size)
+        self.dropout3 = nn.Dropout(dropout)
         self.feed_forward = feed_forward
-        self.sublayer = clones(SublayerConnection(size, dropout), 3)
 
     def forward(self, x, memory, src_mask, tgt_mask):
         "Follow Figure 1 (right) for connections."
+        x_norm1 = self.norm1(x)
+        x = x + self.self_attn(x_norm1, x_norm1, x_norm1, tgt_mask)
         m = memory
-        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
-        x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m, src_mask))
-        return self.sublayer[2](x, self.feed_forward)
+        x_norm2 = self.norm2(x)
+        x = x + self.src_attn(x_norm2, m, m, src_mask) # tgt做了self attn后作为q, 原始的encoder输出作为k,v
+        x_norm3 = self.norm3(x)
+        x = x + self.feed_forward(x_norm3)
+        return x
 
 
 class MultiHeadedAttention(nn.Module):
@@ -217,39 +227,39 @@ class MultiHeadedAttention(nn.Module):
         super(MultiHeadedAttention, self).__init__()
         assert d_model % h == 0
         # We assume d_v always equals d_k
-        self.d_k = d_model // h
-        self.h = h
-        self.linears = clones(nn.Linear(d_model, d_model), 4)
-        self.attn = None
+        self.d_k = d_model // h # dim per head
+        self.h = h # h = 4
+        self.linears = clones(nn.Linear(d_model, d_model), 4) # 4层linear层，就是矩阵乘法x*w
+        self.attn = None # 有什么用吗
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, query, key, value, mask=None):
         "Implements Figure 2"
-        if mask is not None:
+        if mask is not None: # 好像一直都是mask为None
             # Same mask applied to all h heads.
             mask = mask.unsqueeze(1)
         nbatches = query.size(0)
-
         # 1) Do all the linear projections in batch from d_model => h x d_k
-        query, key, value = \
-            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2).contiguous()
-             for l, x in zip(self.linears, (query, key, value))]
-
+        result = []
+        for linear_layer, input_tensor in zip(self.linears, (query, key, value)): # 就是前三个linear层对q, k, v变换一下
+            transformed = linear_layer(input_tensor)
+            reshaped_and_transposed = transformed.view(nbatches, -1, self.h, self.d_k).transpose(1, 2).contiguous() # [B, N, D] -> [B, h, N, d], d = D / h
+            result.append(reshaped_and_transposed)
+        query, key, value = result
         # 2) Apply attention on all the projected vectors in batch.
         x, self.attn = attention(query, key, value, mask=mask,
-                                 dropout=self.dropout)
+                                 dropout=self.dropout) # self.attn没什么用
 
         # 3) "Concat" using a view and apply a final linear.
-        x = x.transpose(1, 2).contiguous() \
-            .view(nbatches, -1, self.h * self.d_k)
-        return self.linears[-1](x)
+        x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k) # [B, h, N, d] -> [B, N, h, d] -> [B, N, h*d] = [B, N, D]
+        return self.linears[-1](x) # 这里用到了第四层lienar层
 
 
 class PositionwiseFeedForward(nn.Module):
     "Implements FFN equation."
     def __init__(self, d_model, d_ff, dropout=0.1):
         super(PositionwiseFeedForward, self).__init__()
-        self.w_1 = nn.Linear(d_model, d_ff)
+        self.w_1 = nn.Linear(d_model, d_ff) # 512 -> 1024
         self.w_2 = nn.Linear(d_ff, d_model)
         self.dropout = nn.Dropout(dropout)
 
@@ -376,7 +386,7 @@ class Transformer(nn.Module):
         tgt = input[1]
         src = src.transpose(2, 1).contiguous()
         tgt = tgt.transpose(2, 1).contiguous()
-        tgt_embedding = self.model(src, tgt, None, None).transpose(2, 1).contiguous()
+        tgt_embedding = self.model(src, tgt, None, None).transpose(2, 1).contiguous() # tgt_embedding里面有src->tgt的内容
         src_embedding = self.model(tgt, src, None, None).transpose(2, 1).contiguous()
         return src_embedding, tgt_embedding
 
@@ -402,12 +412,11 @@ class TemperatureNet(nn.Module):
     def forward(self, *input):
         src_embedding = input[0]
         tgt_embedding = input[1]
-        src_embedding = src_embedding.mean(dim=2)
+        src_embedding = src_embedding.mean(dim=2) # [B, D, N] -> [B, D]
         tgt_embedding = tgt_embedding.mean(dim=2)
-        residual = torch.abs(src_embedding-tgt_embedding)
-
+        residual = torch.abs(src_embedding-tgt_embedding) # 如果这时候准确的话，那么他们的差距应该非常小，接近0，如果接近0，就可以给出很高的置信度，让softmax÷λ的λ很小，变成1 0 encoding
+        # 这个参数是在训练的时候定的？虽然nn会根据不同的数据有不同结果，但是输出出来基本上一致，那可以假定训练的时候基本上已经fix这个λ (0.8233), 0.8233 < 1说明置信度高于正常
         self.feature_disparity = residual
-
         return torch.clamp(self.nn(residual), 1.0/self.temp_factor, 1.0*self.temp_factor), residual
 
 
@@ -426,7 +435,7 @@ class SVDHead(nn.Module):
         tgt_embedding = input[1]
         src = input[2]
         tgt = input[3]
-        batch_size, num_dims, num_points = src.size()
+        batch_size, num_dims, num_points = src.size() # [B, D, N]
         temperature = input[4].view(batch_size, 1, 1)
 
         if self.cat_sampler == 'softmax':
@@ -435,37 +444,39 @@ class SVDHead(nn.Module):
             scores = torch.softmax(temperature*scores, dim=2)
         elif self.cat_sampler == 'gumbel_softmax':
             d_k = src_embedding.size(1)
-            scores = torch.matmul(src_embedding.transpose(2, 1).contiguous(), tgt_embedding) / math.sqrt(d_k)
+            scores = torch.matmul(src_embedding.transpose(2, 1).contiguous(), tgt_embedding) / math.sqrt(d_k) # 包含相互信息的src_e和tgt_e做了一次attn score计算。相当于q ^ k^T / sqrt(d_k)
             scores = scores.view(batch_size*num_points, num_points)
-            temperature = temperature.repeat(1, num_points, 1).view(-1, 1)
-            scores = F.gumbel_softmax(scores, tau=temperature, hard=True)
-            scores = scores.view(batch_size, num_points, num_points)
+            temperature = temperature.repeat(1, num_points, 1).view(-1, 1) # [B, num, 1] -> [B*num, 1]
+            scores = F.gumbel_softmax(scores, tau=temperature, hard=True) # F.gumbel_softmax输入维度必须是2维
+            scores = scores.view(batch_size, num_points, num_points) # 因为softmax对行做，这意味着softmax后，src每个的每个点所代表的行里面，tgt和这个点关系很大的点的概率会很大，其他点的概率会很小
         else:
             raise Exception('not implemented')
 
-        src_corr = torch.matmul(tgt, scores.transpose(2, 1).contiguous())
+        src_corr = torch.matmul(tgt, scores.transpose(2, 1).contiguous()) # 相当于 v * score，其实就得到了src这张图里面特征点在tgt这张图里面的对应点
 
-        src_centered = src - src.mean(dim=2, keepdim=True)
+        src_centered = src - src.mean(dim=2, keepdim=True) # 去中心化
 
         src_corr_centered = src_corr - src_corr.mean(dim=2, keepdim=True)
 
-        H = torch.matmul(src_centered, src_corr_centered.transpose(2, 1).contiguous()).cpu()
+        H = torch.matmul(src_centered, src_corr_centered.transpose(2, 1).contiguous()).cpu() # src这张图中的特征点x_src， tgt这张图中的x_src' 注意不是tgt，是x_src猜测的点x_src'
 
         R = []
 
-        for i in range(src.size(0)):
+        # 利用Singular Value Decomposition (SVD)来分解单应矩阵=H=USV^T。
+        # 计算旋转矩阵R。首先通过R=VU^T得到一个初始的旋转矩阵。然后通过检查其行列式值来确保它是一个合法的旋转矩阵（行列式值为1）。如果行列式值为-1，那么通过修改一个对角线元素的符号来修正它。
+        for i in range(src.size(0)): # B，每个batch（不同的src tgt对）肯定有不同的R T
             u, s, v = torch.svd(H[i])
             r = torch.matmul(v, u.transpose(1, 0)).contiguous()
             r_det = torch.det(r).item()
             diag = torch.from_numpy(np.array([[1.0, 0, 0],
                                               [0, 1.0, 0],
                                               [0, 0, r_det]]).astype('float32')).to(v.device)
-            r = torch.matmul(torch.matmul(v, diag), u.transpose(1, 0)).contiguous()
+            r = torch.matmul(torch.matmul(v, diag), u.transpose(1, 0)).contiguous() # [3, 3]
             R.append(r)
+        
+        R = torch.stack(R, dim=0).cuda() # [B, 3, 3]
 
-        R = torch.stack(R, dim=0).cuda()
-
-        t = torch.matmul(-R, src.mean(dim=2, keepdim=True)) + src_corr.mean(dim=2, keepdim=True)
+        t = torch.matmul(-R, src.mean(dim=2, keepdim=True)) + src_corr.mean(dim=2, keepdim=True) # R反推T
         if self.training:
             self.my_iter += 1
         return R, t.view(batch_size, 3)
@@ -481,22 +492,21 @@ class KeyPointNet(nn.Module):
         tgt = input[1]
         src_embedding = input[2]
         tgt_embedding = input[3]
-        batch_size, num_dims, num_points = src_embedding.size()
-        src_norm = torch.norm(src_embedding, dim=1, keepdim=True)
+        batch_size, num_dims, num_points = src_embedding.size() # [B, D, N] = [\, 512, 768]
+        src_norm = torch.norm(src_embedding, dim=1, keepdim=True) # [\, 1, N]，默认求2范数，比如第一个就是第三维度的第一列的512个数的norm，有点像除去了B这个维度之后对剩下的做batchnorm
         tgt_norm = torch.norm(tgt_embedding, dim=1, keepdim=True)
-        src_topk_idx = torch.topk(src_norm, k=self.num_keypoints, dim=2, sorted=False)[1]
+        src_topk_idx = torch.topk(src_norm, k=self.num_keypoints, dim=2, sorted=False)[1] # num_keypoints=512， 选出最大的512个维度，从768中选512, [512]
         tgt_topk_idx = torch.topk(tgt_norm, k=self.num_keypoints, dim=2, sorted=False)[1]
-        src_keypoints_idx = src_topk_idx.repeat(1, 3, 1)
+        src_keypoints_idx = src_topk_idx.repeat(1, 3, 1) # [B, 3, 512]
         tgt_keypoints_idx = tgt_topk_idx.repeat(1, 3, 1)
-        src_embedding_idx = src_topk_idx.repeat(1, num_dims, 1)
+        src_embedding_idx = src_topk_idx.repeat(1, num_dims, 1) # [B, 512, 512]
         tgt_embedding_idx = tgt_topk_idx.repeat(1, num_dims, 1)
 
         src_keypoints = torch.gather(src, dim=2, index=src_keypoints_idx)
         tgt_keypoints = torch.gather(tgt, dim=2, index=tgt_keypoints_idx)
-        
         src_embedding = torch.gather(src_embedding, dim=2, index=src_embedding_idx)
         tgt_embedding = torch.gather(tgt_embedding, dim=2, index=tgt_embedding_idx)
-        return src_keypoints, tgt_keypoints, src_embedding, tgt_embedding
+        return src_keypoints, tgt_keypoints, src_embedding, tgt_embedding # src本身和src_embedding都被Keypoints筛选好
 
 
 class ACPNet(nn.Module):
@@ -536,26 +546,25 @@ class ACPNet(nn.Module):
  
     def forward(self, *input):
         src, tgt, src_embedding, tgt_embedding, temperature, feature_disparity = self.predict_embedding(*input)
-        rotation_ab, translation_ab = self.head(src_embedding, tgt_embedding, src, tgt, temperature)
+        rotation_ab, translation_ab = self.head(src_embedding, tgt_embedding, src, tgt, temperature) # 默认svd head
         rotation_ba, translation_ba = self.head(tgt_embedding, src_embedding, tgt, src, temperature)
         return rotation_ab, translation_ab, rotation_ba, translation_ba, feature_disparity
 
-    def predict_embedding(self, *input):
-        src = input[0]
+    def predict_embedding(self, *input): # 传入的input是(src, tgt)
+        src = input[0] # 拆分
         tgt = input[1]
-        src_embedding = self.emb_nn(src)
-        tgt_embedding = self.emb_nn(tgt)
+        src_embedding = self.emb_nn(src) # 默认使用DGCNN
+        tgt_embedding = self.emb_nn(tgt) # 同样参数做src tgt的embedding
 
-        src_embedding_p, tgt_embedding_p = self.attention(src_embedding, tgt_embedding)
+        src_embedding_p, tgt_embedding_p = self.attention(src_embedding, tgt_embedding) # 得到了包含相互信息的src_embedding_p和tgt_embedding_p
 
-        src_embedding = src_embedding + src_embedding_p
+        src_embedding = src_embedding + src_embedding_p # 残差连接
         tgt_embedding = tgt_embedding + tgt_embedding_p
 
-        src, tgt, src_embedding, tgt_embedding = self.keypointnet(src, tgt, src_embedding, tgt_embedding)
+        src, tgt, src_embedding, tgt_embedding = self.keypointnet(src, tgt, src_embedding, tgt_embedding) # 根据L2范数筛选出512个keypoints
 
         temperature, feature_disparity = self.temp_net(src_embedding, tgt_embedding)
-
-        return src, tgt, src_embedding, tgt_embedding, temperature, feature_disparity
+        return src, tgt, src_embedding, tgt_embedding, temperature, feature_disparity # 返回的Src/tgt及其embedding都是经过筛选的，这里是[1, 3, 768->512]
 
     def predict_keypoint_correspondence(self, *input):
         src, tgt, src_embedding, tgt_embedding, temperature, _ = self.predict_embedding(*input)
@@ -581,6 +590,7 @@ class PRNet(nn.Module):
         self.cycle_consistency_loss = args.cycle_consistency_loss
 
         if self.model_path is not '':
+            print("load pretrain model from:", self.model_path)
             self.load(self.model_path)
         if torch.cuda.device_count() > 1:
             self.acpnet = nn.DataParallel(self.acpnet)
@@ -631,6 +641,7 @@ class PRNet(nn.Module):
 
             loss = (F.mse_loss(torch.matmul(rotation_ab_pred.transpose(2, 1), rotation_ab), identity) \
                    + F.mse_loss(translation_ab_pred, translation_ab)) * self.discount_factor**i
+            # print(loss)
             feature_alignment_loss = feature_disparity.mean() * self.feature_alignment_loss * self.discount_factor**i
             cycle_consistency_loss = cycle_consistency(rotation_ab_pred_i, translation_ab_pred_i,
                                                        rotation_ba_pred_i, translation_ba_pred_i) \
@@ -684,7 +695,7 @@ class PRNet(nn.Module):
         return total_loss.item(), total_feature_alignment_loss.item(), total_cycle_consistency_loss.item(), \
                total_scale_consensus_loss, rotation_ab_pred, translation_ab_pred
 
-    def _train_one_epoch(self, epoch, train_loader, opt):
+    def _train_one_epoch(self, epoch, train_loader, opt): # 先调用这个train_one_epoch
         self.train()
         total_loss = 0
         rotations_ab = []
@@ -696,7 +707,7 @@ class PRNet(nn.Module):
         total_feature_alignment_loss = 0.0
         total_cycle_consistency_loss = 0.0
         total_scale_consensus_loss = 0.0
-        for data in tqdm(train_loader):
+        for data in tqdm(train_loader): # data_loader中本来就包含了这类数据
             src, tgt, rotation_ab, translation_ab, rotation_ba, translation_ba, euler_ab, euler_ba = [d.cuda()
                                                                                                       for d in data]
             loss, feature_alignment_loss, cycle_consistency_loss, scale_consensus_loss,\

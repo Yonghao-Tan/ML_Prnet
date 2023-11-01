@@ -1,0 +1,9 @@
+# Ignore everything in the ./checkpoints/ directory
+./checkpoints/*
+./__pycache__/*
+
+# But not these specific files
+!./checkpoints/exp2/models/model.best.t7
+!./checkpoints/exp2/models/model.best.t7.blk
+!./checkpoints/exp1/models/model.best.t7
+!./checkpoints/exp3/models/model.best.t7
