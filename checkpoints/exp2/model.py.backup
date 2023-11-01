@@ -452,31 +452,31 @@ class SVDHead(nn.Module):
         else:
             raise Exception('not implemented')
 
-        src_corr = torch.matmul(tgt, scores.transpose(2, 1).contiguous()) # 相当于 v * score
+        src_corr = torch.matmul(tgt, scores.transpose(2, 1).contiguous()) # 相当于 v * score，其实就得到了src这张图里面特征点在tgt这张图里面的对应点
 
         src_centered = src - src.mean(dim=2, keepdim=True) # 去中心化
 
         src_corr_centered = src_corr - src_corr.mean(dim=2, keepdim=True)
 
-        H = torch.matmul(src_centered, src_corr_centered.transpose(2, 1).contiguous()).cpu()
+        H = torch.matmul(src_centered, src_corr_centered.transpose(2, 1).contiguous()).cpu() # src这张图中的特征点x_src， tgt这张图中的x_src' 注意不是tgt，是x_src猜测的点x_src'
 
         R = []
 
-        for i in range(src.size(0)): # B
+        # 利用Singular Value Decomposition (SVD)来分解单应矩阵=H=USV^T。
+        # 计算旋转矩阵R。首先通过R=VU^T得到一个初始的旋转矩阵。然后通过检查其行列式值来确保它是一个合法的旋转矩阵（行列式值为1）。如果行列式值为-1，那么通过修改一个对角线元素的符号来修正它。
+        for i in range(src.size(0)): # B，每个batch（不同的src tgt对）肯定有不同的R T
             u, s, v = torch.svd(H[i])
             r = torch.matmul(v, u.transpose(1, 0)).contiguous()
             r_det = torch.det(r).item()
             diag = torch.from_numpy(np.array([[1.0, 0, 0],
                                               [0, 1.0, 0],
                                               [0, 0, r_det]]).astype('float32')).to(v.device)
-            r = torch.matmul(torch.matmul(v, diag), u.transpose(1, 0)).contiguous()
-            print(r.shape)
+            r = torch.matmul(torch.matmul(v, diag), u.transpose(1, 0)).contiguous() # [3, 3]
             R.append(r)
         
-        R = torch.stack(R, dim=0).cuda()
-        print(R.shape)
+        R = torch.stack(R, dim=0).cuda() # [B, 3, 3]
 
-        t = torch.matmul(-R, src.mean(dim=2, keepdim=True)) + src_corr.mean(dim=2, keepdim=True)
+        t = torch.matmul(-R, src.mean(dim=2, keepdim=True)) + src_corr.mean(dim=2, keepdim=True) # R反推T
         if self.training:
             self.my_iter += 1
         return R, t.view(batch_size, 3)
