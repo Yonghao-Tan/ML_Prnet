@@ -1,5 +1,5 @@
 # Partial Registration Network
-
+This is a repo fetch originally from https://github.com/yfeng95/PRNet, as our `COMP 5212 - Machine Learning` project.
 ## Prerequisites 
 PyTorch=1.0.1: https://pytorch.org  (PyTorch 1.1 has a svd bug, which will crash the training)
 
