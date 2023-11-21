@@ -15,8 +15,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import r2_score
-from util import transform_point_cloud, npmat2euler, quat2mat
-
+from util import transform_point_cloud, npmat2euler, quat2mat, visualize_pcs
+import open3d as o3d
 
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
@@ -584,6 +584,7 @@ class PRNet(nn.Module):
         self.model_path = args.model_path
         self.feature_alignment_loss = args.feature_alignment_loss
         self.cycle_consistency_loss = args.cycle_consistency_loss
+        self.vis = args.vis 
 
         if self.model_path is not '':
             print("load pretrain model from:", self.model_path)
@@ -758,6 +759,9 @@ class PRNet(nn.Module):
         self.logger.write(info)
         return info
 
+    
+
+
     def _test_one_epoch(self, epoch, test_loader):
         self.eval()
         total_loss = 0
@@ -766,13 +770,19 @@ class PRNet(nn.Module):
         rotations_ab_pred = []
         translations_ab_pred = []
         eulers_ab = []
+
+        original_pcs = []
+        transformed_pcs = []
+
         num_examples = 0
         total_feature_alignment_loss = 0.0
         total_cycle_consistency_loss = 0.0
         total_scale_consensus_loss = 0.0
+
         for data in tqdm(test_loader):
             src, tgt, rotation_ab, translation_ab, rotation_ba, translation_ba, euler_ab, euler_ba = [d.cuda()
                                                                                                       for d in data]
+            original_pcs.append(src.detach().cpu().numpy())
             loss, feature_alignment_loss, cycle_consistency_loss, scale_consensus_loss, \
             rotation_ab_pred, translation_ab_pred = self._test_one_batch(src, tgt, rotation_ab, translation_ab)
             batch_size = src.size(0)
@@ -787,6 +797,22 @@ class PRNet(nn.Module):
             rotations_ab_pred.append(rotation_ab_pred.detach().cpu().numpy())
             translations_ab_pred.append(translation_ab_pred.detach().cpu().numpy())
             eulers_ab.append(euler_ab.cpu().numpy())
+
+            transformed_pc = transform_point_cloud(src.detach(), rotation_ab_pred, translation_ab_pred)
+            transformed_pcs.append(transformed_pc.detach().cpu().numpy())
+        
+        if self.vis: 
+            for idx, (original_pc, transformed_pc) in enumerate(zip(original_pcs, transformed_pcs)):
+                original_o3d = o3d.geometry.PointCloud()
+                original_o3d.points = o3d.utility.Vector3dVector(original_pc[0])  
+
+                transformed_o3d = o3d.geometry.PointCloud()
+                transformed_o3d.points = o3d.utility.Vector3dVector(transformed_pc[0])  
+
+                filename = str(idx) + 'screencapture'
+                visualize_pcs(original_o3d, transformed_o3d, filename)
+                print(f'Epoch {idx} is visualized')
+
         avg_loss = total_loss / num_examples
         avg_feature_alignment_loss = total_feature_alignment_loss / num_examples
         avg_cycle_consistency_loss = total_cycle_consistency_loss / num_examples

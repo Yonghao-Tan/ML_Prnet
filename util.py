@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 from scipy.spatial.transform import Rotation
-
+import open3d as o3d
 
 def euler2mat(angle):
     """
@@ -158,6 +158,31 @@ def npmat2euler(mats, seq='zyx'):
         eulers.append(r.as_euler(seq, degrees=True))
     return np.asarray(eulers, dtype='float32')
 
+
+
+def visualize_pcs(pcd, pcd_transformed, filename): 
+    # FOR GUI (e.g., Win)
+    # vis = o3d.visualization.Visualizer()
+    # vis.create_window(visible=False)  
+    # vis.add_geometry(pcd)
+    # vis.add_geometry(pcd_transformed)
+    # vis.update_geometry(pcd)
+    # vis.update_geometry(pcd_transformed)
+    # vis.poll_events()
+    # vis.update_renderer()
+    # vis.capture_screen_image("screenshot.png")
+    # print('Screen capture saved.')
+    # vis.destroy_window()
+
+
+    # FOR SERVER: NO GUI: OffscreenRenderer
+    renderer = o3d.visualization.rendering.OffscreenRenderer(640, 480)
+    renderer.scene.set_background([1, 1, 1, 1])  
+    renderer.scene.add_geometry("pcd", pcd, o3d.visualization.rendering.MaterialRecord())
+    renderer.scene.add_geometry("pcd_transformed", pcd_transformed, o3d.visualization.rendering.MaterialRecord())
+    image = renderer.render_to_image()
+    save_file = filename + '.png'
+    o3d.io.write_image("screenshot.png", image)
 
 if __name__ == '__main__':
     print('hello world')
