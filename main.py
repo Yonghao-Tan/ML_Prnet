@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import MultiStepLR
 from data import ModelNet40
+from data_bunny import StanfordBunny
 import numpy as np
 from torch.utils.data import DataLoader
 from model import PRNet
@@ -102,9 +103,9 @@ def main():
                         metavar='N', help='use gumbel_softmax to get the categorical sample')
     parser.add_argument('--dropout', type=float, default=0.0, metavar='N',
                         help='Dropout ratio in transformer')
-    parser.add_argument('--batch_size', type=int, default=36, metavar='batch_size',
+    parser.add_argument('--batch_size', type=int, default=2, metavar='batch_size',
                         help='Size of batch)')
-    parser.add_argument('--test_batch_size', type=int, default=12, metavar='batch_size',
+    parser.add_argument('--test_batch_size', type=int, default=2, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=100, metavar='N',
                         help='number of episode to train ')
@@ -132,15 +133,18 @@ def main():
                         help='Num of points to use')
     parser.add_argument('--n_subsampled_points', type=int, default=768, metavar='N',
                         help='Num of subsampled points to use')
-    parser.add_argument('--dataset', type=str, default='modelnet40', choices=['modelnet40'], metavar='N',
+    parser.add_argument('--dataset', type=str, default='modelnet40', choices=['modelnet40','stfbunny'], metavar='N',
+    # parser.add_argument('--dataset', type=str, default='modelnet40', choices=['modelnet40'], metavar='N',
                         help='dataset to use')
     parser.add_argument('--rot_factor', type=float, default=4, metavar='N',
                         help='Divided factor of rotation')
     parser.add_argument('--model_path', type=str, default='', metavar='N',
                         help='Pretrained model path')
     parser.add_argument('--resume', action='store_true', default=False)
-
+    parser.add_argument('--vis', type = bool, default= False, metavar='N',
+                        help='Wether to visualize the testing of transformation per epoch')
     args = parser.parse_args()
+
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
@@ -159,6 +163,18 @@ def main():
                                             partition='test', gaussian_noise=args.gaussian_noise,
                                             unseen=args.unseen, rot_factor=args.rot_factor),
                                  batch_size=args.test_batch_size, shuffle=False, drop_last=False, num_workers=6)
+    elif args.dataset == 'stfbunny': 
+        train_loader = DataLoader(StanfordBunny(num_points=args.n_points,
+                                                   num_subsampled_points=args.n_subsampled_points,
+                                                   gaussian_noise=args.gaussian_noise,
+                                                   rot_factor=args.rot_factor),
+                              batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=6)
+        test_loader = DataLoader(StanfordBunny(num_points=args.n_points,
+                                                  num_subsampled_points=args.n_subsampled_points,
+                                                  gaussian_noise=args.gaussian_noise,
+                                                  rot_factor=args.rot_factor),
+                             batch_size=args.test_batch_size, shuffle=False, drop_last=False, num_workers=6)
+
     else:
         raise Exception("not implemented")
 

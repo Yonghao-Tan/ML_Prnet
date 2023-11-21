@@ -40,12 +40,14 @@ def load_data(partition):
         all_label.append(label)
     all_data = np.concatenate(all_data, axis=0)
     all_label = np.concatenate(all_label, axis=0)
+    print(all_data.shape)  # for test: (2468, 2048, 3)
+    print(all_label.shape) # for test:  (2468, 1)
     return all_data, all_label
 
 
-def translate_pointcloud(pointcloud):
-    xyz1 = np.random.uniform(low=2. / 3., high=3. / 2., size=[3])
-    xyz2 = np.random.uniform(low=-0.2, high=0.2, size=[3])
+def translate_pointcloud(pointcloud):     #根本没用上
+    xyz1 = np.random.uniform(low=2. / 3., high=3. / 2., size=[3])   #非均匀缩放 
+    xyz2 = np.random.uniform(low=-0.2, high=0.2, size=[3])          #平移
 
     translated_pointcloud = np.add(np.multiply(pointcloud, xyz1), xyz2).astype('float32')
     return translated_pointcloud
@@ -53,7 +55,7 @@ def translate_pointcloud(pointcloud):
 
 def jitter_pointcloud(pointcloud, sigma=0.01, clip=0.05):
     N, C = pointcloud.shape
-    pointcloud += np.clip(sigma * np.random.randn(N, C), -1 * clip, clip)
+    pointcloud += np.clip(sigma * np.random.randn(N, C), -1 * clip, clip)      #抖动，同形状noise matrix
     return pointcloud
 
 
@@ -144,6 +146,8 @@ class ModelNet40(Dataset):
             pointcloud2 = jitter_pointcloud(pointcloud2)
 
         if self.subsampled:
+            # print(pointcloud1.shape)
+            # print(pointcloud2.shape)
             pointcloud1, pointcloud2 = farthest_subsample_points(pointcloud1, pointcloud2,
                                                                  num_subsampled_points=self.num_subsampled_points)
 
